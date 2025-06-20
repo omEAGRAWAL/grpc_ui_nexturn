@@ -20,9 +20,9 @@ func main() {
 		}
 		c.Next()
 	})
-	r.Static("/assets", "./dist/assets")
+	r.Static("/assets", "./GRPC_UI/dist/assets")
 	r.NoRoute(func(c *gin.Context) {
-		c.File("./dist/index.html")
+		c.File("./GRPC_UI/dist/index.html")
 	})
 	r.POST("/api/upload/proto", handler.HandleProtoUpload)      // Upload .proto
 	r.GET("/api/listServices", handler.HandleListServices)      // List services and methods

@@ -1,0 +1,36 @@
+name: Deploy Go App to EC2
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22'
+
+      - name: Build binary
+        run: go build -o grpc_ui_nexturn main.go
+
+      - name: Decode SSH key
+        run: |
+          echo "${{ secrets.EC2_KEY }}" | base64 -d > key.pem
+          chmod 600 key.pem
+
+      - name: Copy binary to EC2
+        run: |
+          scp -i key.pem -o StrictHostKeyChecking=no grpc_ui_nexturn ${{ secrets.EC2_HOST }}:/home/ubuntu/grpc_ui_nexturn/
+
+      - name: Restart systemd service
+        run: |
+          ssh -i key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_HOST }} << 'EOF'
+            sudo systemctl restart grpcui
+          EOF
