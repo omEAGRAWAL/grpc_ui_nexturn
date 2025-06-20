@@ -42,11 +42,13 @@ jobs:
       # ─────────────────────────────────────────────
       - name: Upload binary to EC2
         run: |
-          ssh -i key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_HOST }} \
-              "mkdir -p /home/ubuntu/grpc_ui_nexturn"
+          ssh -i key.pem -o StrictHostKeyChecking=no ${{ secrets.EC2_HOST }} << 'EOF'
+            sudo mkdir -p /home/ubuntu/grpc_ui_nexturn
+            sudo chown -R ubuntu:ubuntu /home/ubuntu/grpc_ui_nexturn
+          EOF
           scp -i key.pem -o StrictHostKeyChecking=no grpc_ui_nexturn \
-              ${{ secrets.EC2_HOST }}:/home/ubuntu/grpc_ui_nexturn/grpc_ui_nexturn
-
+            ${{ secrets.EC2_HOST }}:/home/ubuntu/grpc_ui_nexturn/grpc_ui_nexturn
+      
       # ─────────────────────────────────────────────
       # 6) Restart service & show status
       # ─────────────────────────────────────────────
