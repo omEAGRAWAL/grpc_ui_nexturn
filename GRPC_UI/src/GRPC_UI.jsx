@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Send, List, Wifi, WifiOff, Play, Square, MessageCircle, ArrowUpDown, ArrowDown, ArrowUp, Zap, Server, Globe, Activity, Sun, Moon } from 'lucide-react';
+//
+// const API_BASE = 'http://localhost:8081/api';
+// const WS_BASE = 'ws://localhost:8081/grpc/ws/stream';
+const API_BASE = '/api';
+const WS_BASE  = ((location.protocol === 'https:') ? 'wss://' : 'ws://') + location.host + '/grpc/ws/stream';
 
-const API_BASE = 'http://localhost:8081/api';
-const WS_BASE = 'ws://localhost:8081/grpc/ws/stream';
 
 export default function GRPCUIFrontend() {
   const [darkMode, setDarkMode] = useState(true);
