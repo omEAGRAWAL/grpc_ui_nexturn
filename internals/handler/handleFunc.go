@@ -12,11 +12,14 @@ import (
 	"github.com/jhump/protoreflect/dynamic"
 	"github.com/jhump/protoreflect/dynamic/grpcdynamic"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -285,7 +288,7 @@ func HandleGRPCWebSocketStream(c *gin.Context) {
 	}
 
 	// Connect to gRPC
-	clientConn, err := grpc.Dial(init.Target, grpc.WithInsecure())
+	clientConn, err := dialTarget(init.Target)
 	if err != nil {
 		conn.WriteJSON(gin.H{"error": "Failed to dial target", "details": err.Error()})
 		return
@@ -328,6 +331,43 @@ func inferMode(method *desc.MethodDescriptor) string {
 	default:
 		return "unary"
 	}
+}
+
+func dialTarget(rawTarget string) (*grpc.ClientConn, error) {
+	var target string
+	var opts grpc.DialOption
+
+	// Try to parse as full URL (e.g. "https://xxx.ngrok-free.app:443")
+	if strings.HasPrefix(rawTarget, "http://") || strings.HasPrefix(rawTarget, "https://") {
+		u, err := url.Parse(rawTarget)
+		if err != nil {
+			return nil, err
+		}
+		host := u.Host
+		if !strings.Contains(host, ":") {
+			if u.Scheme == "https" {
+				host += ":443"
+			} else {
+				host += ":80"
+			}
+		}
+		target = host
+		if u.Scheme == "https" {
+			opts = grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
+		} else {
+			opts = grpc.WithTransportCredentials(insecure.NewCredentials())
+		}
+	} else {
+		// Assume it's a host:port like "localhost:50051" or "0.tcp.ngrok.io:21934"
+		target = rawTarget
+		if strings.HasSuffix(target, ":443") {
+			opts = grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
+		} else {
+			opts = grpc.WithTransportCredentials(insecure.NewCredentials())
+		}
+	}
+
+	return grpc.Dial(target, opts)
 }
 
 func handleServerStream(ctx context.Context, stub grpcdynamic.Stub, conn *websocket.Conn, method *desc.MethodDescriptor) {
