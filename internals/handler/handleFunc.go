@@ -35,68 +35,6 @@ var (
 var importPaths []string
 var descriptorSet descriptorpb.FileDescriptorSet
 
-//	func HandleProtoUpload(c *gin.Context) {
-//		file, err := c.FormFile("proto")
-//		if err != nil {
-//			c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
-//			return
-//		}
-//
-//		if err := os.MkdirAll(tempProtoDir, os.ModePerm); err != nil {
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create upload dir"})
-//			return
-//		}
-//
-//		savedPath := filepath.Join(tempProtoDir, file.Filename)
-//		if err := c.SaveUploadedFile(file, savedPath); err != nil {
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not save file"})
-//			return
-//		}
-//
-//		// Find protoc in PATH
-//		//protocPath, err := exec.LookPath("protoc")
-//		protocPath, err := installProtocIfMissing()
-//		if err != nil {
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "protoc not installed and failed to download: " + err.Error()})
-//			return
-//		}
-//
-//		if err != nil {
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "protoc not found in PATH"})
-//			return
-//		}
-//
-//		args := []string{}
-//		for _, path := range importPaths {
-//			args = append(args, "--proto_path="+path)
-//		}
-//		args = append(args,
-//			"--proto_path="+tempProtoDir,
-//			"--descriptor_set_out="+descriptorSetPath,
-//			"--include_imports",
-//			savedPath,
-//		)
-//
-//		cmd := exec.Command(protocPath, args...)
-//		cmd.Stdout = os.Stdout
-//		cmd.Stderr = os.Stderr
-//		if err := cmd.Run(); err != nil {
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to compile .proto with protoc"})
-//			return
-//		}
-//
-//		data, err := os.ReadFile(descriptorSetPath)
-//		if err != nil {
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not read descriptor set"})
-//			return
-//		}
-//		if err := proto.Unmarshal(data, &descriptorSet); err != nil {
-//			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse descriptor set"})
-//			return
-//		}
-//
-//		c.JSON(http.StatusOK, gin.H{"message": "Proto uploaded and compiled successfully"})
-//	}
 func HandleProtoUpload(c *gin.Context) {
 	file, err := c.FormFile("proto")
 	if err != nil {
@@ -412,12 +350,28 @@ func handleClientStream(ctx context.Context, stub grpcdynamic.Stub, conn *websoc
 		if err != nil {
 			break
 		}
-		if string(msgRaw) == "__END__" {
+
+		// Parse raw JSON to check for {"end": true}
+		var generic map[string]interface{}
+		if err := json.Unmarshal(msgRaw, &generic); err != nil {
+			conn.WriteJSON(gin.H{"error": "Invalid JSON", "details": err.Error()})
+			continue
+		}
+
+		if val, ok := generic["end"].(bool); ok && val {
 			break
 		}
+
+		// Unmarshal into dynamic gRPC request message
 		reqMsg := dynamic.NewMessage(method.GetInputType())
-		if err := reqMsg.UnmarshalJSON(msgRaw); err == nil {
-			_ = stream.SendMsg(reqMsg)
+		if err := reqMsg.UnmarshalJSON(msgRaw); err != nil {
+			conn.WriteJSON(gin.H{"error": "UnmarshalJSON failed", "details": err.Error()})
+			continue
+		}
+
+		if err := stream.SendMsg(reqMsg); err != nil {
+			conn.WriteJSON(gin.H{"error": "SendMsg failed", "details": err.Error()})
+			break
 		}
 	}
 

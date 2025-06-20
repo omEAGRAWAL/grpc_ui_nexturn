@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Send, List, Wifi, WifiOff, Play, Square, MessageCircle, ArrowUpDown, ArrowDown, ArrowUp, Zap, Server, Globe, Activity, Sun, Moon } from 'lucide-react';
 //
-// const API_BASE = 'http://localhost:8081/api';
-// const WS_BASE = 'ws://localhost:8081/grpc/ws/stream';
-const API_BASE = '/api';
-const WS_BASE  = ((location.protocol === 'https:') ? 'wss://' : 'ws://') + location.host + '/grpc/ws/stream';
+const API_BASE = 'http://localhost:8081/api';
+const WS_BASE = 'ws://localhost:8081/grpc/ws/stream';
+// const API_BASE = '/api';
+// const WS_BASE  = ((location.protocol === 'https:') ? 'wss://' : 'ws://') + location.host + '/grpc/ws/stream';
 
 
 export default function GRPCUIFrontend() {
@@ -25,7 +25,7 @@ export default function GRPCUIFrontend() {
   const [streamMessages, setStreamMessages] = useState([]);
   const [streamMode, setStreamMode] = useState('server');
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamInput, setStreamInput] = useState('{}');
+  const [streamInput, setStreamInput] = useState();
 
   const wsRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -91,63 +91,7 @@ export default function GRPCUIFrontend() {
       console.error('Failed to load services:', error);
     }
   };
-  //
-  // const startWebSocketStream = () => {
-  //   if (!selectedService || !selectedMethod) {
-  //     setStreamMessages(prev => [...prev, { type: 'error', content: 'Please select a service and method' }]);
-  //     return;
-  //   }
-  //
-  //   try {
-  //     const ws = new WebSocket(WS_BASE);
-  //     wsRef.current = ws;
-  //
-  //     ws.onopen = () => {
-  //       setWsConnection(ws);
-  //       setIsStreaming(true);
-  //       setStreamMessages(prev => [...prev, { type: 'system', content: `Connected to WebSocket. Mode: ${streamMode}` }]);
-  //
-  //       // Send initialization message
-  //       const initMessage = {
-  //         target,
-  //         service: selectedService,
-  //         method: selectedMethod,
-  //         mode: ""
-  //       };
-  //       ws.send(JSON.stringify(initMessage));
-  //     };
-  //
-  //     ws.onmessage = (event) => {
-  //       try {
-  //         const data = JSON.parse(event.data);
-  //         setStreamMessages(prev => [...prev, {
-  //           type: 'response',
-  //           content: JSON.stringify(data, null, 2),
-  //           timestamp: new Date().toLocaleTimeString()
-  //         }]);
-  //       } catch {
-  //         setStreamMessages(prev => [...prev, {
-  //           type: 'response',
-  //           content: event.data,
-  //           timestamp: new Date().toLocaleTimeString()
-  //         }]);
-  //       }
-  //     };
-  //
-  //     ws.onerror = (error) => {
-  //       setStreamMessages(prev => [...prev, { type: 'error', content: 'WebSocket error occurred' }]);
-  //     };
-  //
-  //     ws.onclose = () => {
-  //       setWsConnection(null);
-  //       setIsStreaming(false);
-  //       setStreamMessages(prev => [...prev, { type: 'system', content: 'WebSocket connection closed' }]);
-  //     };
-  //
-  //   } catch (error) {
-  //     setStreamMessages(prev => [...prev, { type: 'error', content: 'Failed to connect: ' + error.message }]);
-  //   }
-  // };
+
   const startWebSocketStream = () => {
     if (!selectedService || !selectedMethod) {
       setStreamMessages(prev => [
@@ -383,7 +327,7 @@ export default function GRPCUIFrontend() {
               <button
                   onClick={handleFileUpload}
                   disabled={isLoading || !protoFile}
-                  className={`px-8 py-5 ${themeClasses.primaryButton} disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl font-bold transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 relative overflow-hidden group`}
+                  className={`px-8 py-5 mb-3 ${themeClasses.primaryButton} disabled:opacity-50 disabled:cursor-not-allowed rounded-2xl font-bold transition-all duration-200 transform hover:scale-105 disabled:hover:scale-100 relative overflow-hidden group`}
               >
                 <div className="absolute inset-0 bg-gradient-to-r from-[#00bfa6]/20 to-[#00bfa6]/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                 <div className="relative z-10">
@@ -564,77 +508,79 @@ export default function GRPCUIFrontend() {
                     </div>
                   </div>
               )}
-              {/* ────────────────────────────────────────────────────────────────
-     METADATA + AUTH  •  ADVANCED PANEL
-──────────────────────────────────────────────────────────────── */}
-              <div className="mb-12 p-6 rounded-2xl border bg-white/60 dark:bg-black/30 border-gray-200 dark:border-gray-700 backdrop-blur-md shadow-sm">
-
-                <h3 className="text-xl font-bold mb-6 text-gray-800 dark:text-gray-100">
-                  Advanced Settings
-                </h3>
-
-                {/* ----- Metadata JSON ----- */}
-                <div className="mb-8">
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Custom gRPC Metadata <span className="text-xs text-gray-500">(JSON)</span>
-                  </label>
-                  <textarea
-                      rows={3}
-                      value={metadataJson}
-                      onChange={e => setMetadataJson(e.target.value)}
-                      placeholder='{"x-api-key": "1234", "locale": "en-US"}'
-                      className="w-full p-5 bg-white dark:bg-black/20 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-2xl font-mono text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none transition-all duration-200"
-                  />
+              {/* Advanced Settings */}
+              <div className={`${themeClasses.card} rounded-3xl p-8 mb-8 h-80`}>
+                <div className="flex items-center gap-4 mb-8">
+                  <div className={`p-3 ${themeClasses.accent} rounded-xl`}>
+                    <Zap className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h2 className={`text-xl font-bold ${themeClasses.text.primary}`}>Advanced Settings</h2>
+                    <div className="h-1 w-24 bg-gradient-to-r from-[#00bfa6] via-[#00bfa6]/70 to-[#00bfa6]/40 mt-2 rounded-full shadow-sm shadow-[#00bfa6]/40"></div>
+                  </div>
                 </div>
 
-                {/* ----- Authentication ----- */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                    Authentication
-                  </label>
-                  <select
-                      value={authType}
-                      onChange={e => setAuthType(e.target.value)}
-                      className="w-full p-4 bg-white dark:bg-black/20 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 rounded-2xl text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-all duration-200"
-                  >
-                    <option value="none">None</option>
-                    <option value="bearer">Bearer / API Key</option>
-                    <option value="basic">HTTP Basic</option>
-                  </select>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* Metadata JSON */}
+                  <div className="space-y-4">
+                    <label className={`block text-sm font-semibold ${themeClasses.text.secondary}`}>
+                      Custom gRPC Metadata <span className="text-xs opacity-75">(JSON)</span>
+                    </label>
+                    <textarea
+                        rows={2}
+                        value={metadataJson}
+                        onChange={e => setMetadataJson(e.target.value)}
+                        placeholder='{"x-api-key": "1234", "locale": "en-US"}'
+                        className={`w-full p-5 ${themeClasses.input} rounded-2xl font-mono text-sm backdrop-blur-sm focus:ring-2 transition-all duration-200 resize-none`}
+                    />
+                  </div>
 
-                  {/* Bearer Token Input */}
-                  {authType === 'bearer' && (
-                      <input
-                          type="text"
-                          placeholder="Bearer / API token"
-                          value={authToken}
-                          onChange={e => setAuthToken(e.target.value)}
-                          className="mt-4 w-full p-4 bg-white dark:bg-black/20 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-2xl font-mono text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-all duration-200"
-                      />
-                  )}
+                  {/* Authentication */}
+                  <div className="space-y-4">
+                    <label className={`block text-sm font-semibold ${themeClasses.text.secondary}`}>
+                      Authentication
+                    </label>
+                    <select
+                        value={authType}
+                        onChange={e => setAuthType(e.target.value)}
+                        className={`w-full p-2 ${themeClasses.input} rounded-2xl backdrop-blur-sm focus:ring-2 transition-all duration-200`}
+                    >
+                      <option value="none">None</option>
+                      <option value="bearer">Bearer / API Key</option>
+                      <option value="basic">HTTP Basic</option>
+                    </select>
 
-                  {/* Basic Auth Inputs */}
-                  {authType === 'basic' && (
-                      <div className="mt-4 space-y-4">
+                    {authType === 'bearer' && (
                         <input
                             type="text"
-                            placeholder="Username"
-                            value={authUser}
-                            onChange={e => setAuthUser(e.target.value)}
-                            className="w-full p-4 bg-white dark:bg-black/20 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-2xl font-mono text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-all duration-200"
+                            placeholder="Bearer / API token"
+                            value={authToken}
+                            onChange={e => setAuthToken(e.target.value)}
+                            className={`w-full p-2 ${themeClasses.input} rounded-2xl backdrop-blur-sm focus:ring-2 transition-all duration-200`}
                         />
-                        <input
-                            type="password"
-                            placeholder="Password"
-                            value={authPass}
-                            onChange={e => setAuthPass(e.target.value)}
-                            className="w-full p-4 bg-white dark:bg-black/20 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-2xl font-mono text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none transition-all duration-200"
-                        />
-                      </div>
-                  )}
+                    )}
+
+                    {authType === 'basic' && (
+                        <div className="space-y-4">
+                          <input
+                              type="text"
+                              placeholder="Username"
+                              value={authUser}
+                              onChange={e => setAuthUser(e.target.value)}
+                              className={`w-full p-2 ${themeClasses.input} rounded-2xl backdrop-blur-sm focus:ring-2 transition-all duration-200`}
+                          />
+                          <input
+                              type="password"
+                              placeholder="Password"
+                              value={authPass}
+                              onChange={e => setAuthPass(e.target.value)}
+                              className={`w-full p-2 ${themeClasses.input} rounded-2xl backdrop-blur-sm focus:ring-2 transition-all duration-200`}
+                          />
+                        </div>
+                    )}
+                  </div>
                 </div>
               </div>
-
               {/* Stream Messages */}
               <div>
                 <div className="flex items-center justify-between mb-6">
@@ -656,7 +602,7 @@ export default function GRPCUIFrontend() {
                 </div>
 
 
-                <div className={`h-96 p-6 ${darkMode ? 'bg-black/30' : 'bg-gray-50/50'} border ${darkMode ? 'border-gray-700/50' : 'border-gray-200'} rounded-2xl overflow-y-auto backdrop-blur-sm custom-scrollbar`}>
+                <div className={`h-60  p-6 ${darkMode ? 'bg-black/30' : 'bg-gray-50/50'} border ${darkMode ? 'border-gray-700/50' : 'border-gray-200'} rounded-2xl overflow-y-auto backdrop-blur-sm custom-scrollbar`}>
                   {streamMessages.length === 0 ? (
                       <div className="h-full flex items-center justify-center">
                         <div className="text-center">
