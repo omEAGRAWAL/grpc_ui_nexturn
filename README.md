@@ -4,31 +4,30 @@
 A modern, browser-based UI for testing and interacting with **gRPC** services dynamically. Supports unary, server-streaming, client-streaming, and bidirectional streaming methods using WebSockets and React.
 
 ---
-the website is hosted at http://grpcui.oomagr.me/
 
-the user need a publically accesble server to test using this website
-he can host using ngrok
-# 1. Download & install
-curl -sS https://ngrok.run | sh      # or grab the zip for your OS
+**🌐 Live Demo:** [http://grpcui.oomagr.me:8081](http://grpcui.oomagr.me:8081)  
+**🧪 Sample gRPC Server:** [http://grpcui.omagr.me:50051](http://grpcui.omagr.me:50051)
 
-# 2. Add your auth token
-ngrok config add-authtoken <YOUR_TOKEN>
+> ⚠️ To test your own services, your gRPC server must be publicly accessible.
 
-#make your server public
-# expose gRPC on localhost:50051
-ngrok http --app-protocol=http2 50051
+---
 
+## 🌍 Make Your Server Public Using ngrok
 
---
-Paste your screenshots here (drag-drop in GitHub or use image links):
+1. **Download & install ngrok**
+   ```bash
+   curl -sS https://ngrok.run | sh
+   ```
 
-![Home UI](./screenshots/home.png)
-![img_1.png](img_1.png)
-![Service Explorer](./screenshots/explorer.png)
-![img_2.png](img_2.png)
-![Unary Call Result](./screenshots/unary.png)
-![img_3.png](img_3.png)
-![Streaming](./screenshots/streaming.png)
+2. **Add your auth token**
+   ```bash
+   ngrok config add-authtoken <YOUR_TOKEN>
+   ```
+
+3. **Expose your gRPC server**
+   ```bash
+   ngrok http --app-protocol=http2 50051
+   ```
 
 ---
 
@@ -37,14 +36,14 @@ Paste your screenshots here (drag-drop in GitHub or use image links):
 - 🌐 Access gRPC services from the browser using WebSockets.
 - 📂 Upload `.proto` files or zipped packages.
 - 🔎 Discover services and methods dynamically.
-- 🔁 Support for all gRPC modes:
+- 🔁 Full gRPC method support:
   - Unary
   - Server Streaming
   - Client Streaming
   - Bidirectional Streaming
-- 🔒 Metadata and authentication headers support.
-- 🌓 Clean and responsive UI with light/dark theme toggle.
-- 📦 Deployable on EC2 or any server.
+- 🔒 Supports metadata and authentication headers.
+- 🌓 Responsive UI with light/dark mode.
+- 🚀 Easily deployable on any cloud server (EC2, etc).
 
 ---
 
@@ -52,12 +51,12 @@ Paste your screenshots here (drag-drop in GitHub or use image links):
 
 ```
 grpc_ui/
-├── main.go               # Gin web server
+├── main.go               # Gin web server entry point
 ├── internals/
-│   └── handler/          # gRPC + WebSocket handlers
-├── uploaded_protos/      # Temp folder for uploaded .proto files
-├── dist/                 # Built React UI (Vite)
-├── grpcExampleServer/    # Sample gRPC server (optional)
+│   └── handler/          # gRPC and WebSocket handlers
+├── uploaded_protos/      # Temporary proto storage
+├── dist/                 # React UI build (via Vite)
+├── grpcExampleServer/    # Sample gRPC server
 └── ...
 ```
 
@@ -72,84 +71,73 @@ git clone https://github.com/yourusername/grpc_ui.git
 cd grpc_ui
 ```
 
-### 2. Install Go & Protoc (if not installed)
+### 2. Install Go & Protoc
 
 ```bash
-# Go
+# Install Go
 sudo apt install golang
 
-# Protoc
+# Install Protoc
 sudo apt install unzip
 curl -OL https://github.com/protocolbuffers/protobuf/releases/download/v25.0/protoc-25.0-linux-x86_64.zip
 unzip protoc-25.0-linux-x86_64.zip -d $HOME/.local
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Or use the included script:
+Or use the helper script:
 ```bash
 chmod +x install_protoc.sh
 ./install_protoc.sh
 ```
 
-### 3. Install Dependencies
+### 3. Install Go dependencies
 
 ```bash
 go mod tidy
 ```
 
-### 4. Build & Run
+### 4. Run the Server
 
 ```bash
 go run main.go
 ```
 
-By default, it runs on [http://localhost:8081](http://localhost:8080)
+> Access via: [http://localhost:8081](http://localhost:8081)
 
 ---
 
 ## 🧑‍💻 How to Use
 
-### 🔁 Upload `.proto`
+### 📂 Upload `.proto` Files
 
-1. Drag & drop `.proto` file or `.zip` with multiple `.proto`s.
-2. Service list loads dynamically.
+- Drag & drop a `.proto` or `.zip` file containing proto files.
+- Services and methods will be loaded dynamically.
 
-### 🎯 Select gRPC Target
+### 🎯 Connect to gRPC Server
 
-1. Enter gRPC server address (e.g., `localhost:50051`).
-2. Select service and method.
+- Input your server address (e.g., `localhost:50051` or ngrok link).
+- Select the service and method you want to call.
 
-### ⚙️ Metadata & Auth
+> 💡 Use a public URL or host locally.
 
-- Add metadata in JSON format:
-  ```json
-  { "x-api-key": "12345", "authorization": "Bearer token" }
-  ```
+### 🛡 Add Metadata / Auth Headers
 
-### 🔄 Streaming
+Provide headers in JSON format:
+```json
+{ "x-api-key": "12345", "authorization": "Bearer token" }
+```
 
-- For streaming, interact in real-time:
-  - Send multiple messages from client.
-  - Receive multiple from server.
-  - End client call with empty JSON (`{}`) if needed.
+### 🔄 Use Streaming
 
----
-
-## 🌍 Deploy on EC2
-
-1. Upload files to EC2.
-2. Use `screen` or `nohup` to run in background:
-   ```bash
-   nohup go run main.go > log.txt 2>&1 &
-   ```
-3. Open port `8080` in EC2 Security Group.
-4. Access via `http://<EC2-PUBLIC-IP>:8080`.
+- Send multiple messages for streaming methods.
+- Receive real-time responses.
+- To end a client stream, send an empty JSON: `{}`
 
 ---
 
 ## 🧪 Sample gRPC Server
 
-Use included sample gRPC server or your own to test.
+You can test the UI with the included example server:
 
 ```bash
 cd grpcExampleServer
@@ -158,31 +146,44 @@ go run server.go
 
 ---
 
-## 🔧 Configuration
+## ⚙️ Customization
 
-You can customize:
+You can tweak:
 
-- `port`, `CORS`, or WebSocket path in `main.go`
-- gRPC dial options (TLS, credentials)
-- UI branding from the React source
+- Port, CORS, and WebSocket settings in `main.go`
+- gRPC dial options (e.g., TLS, credentials)
+- UI appearance and branding via React source
 
 ---
 
 ## 🙋 Use Cases
 
-- ✅ Frontend debugging of gRPC endpoints
-- ✅ Internal gRPC tool for dev/test teams
-- ✅ Customer-facing gRPC explorer for APIs
-- ✅ Local testing of protobuf definitions
+- ✅ gRPC endpoint debugging
+- ✅ Internal dev/test tools
+- ✅ Public API exploration
+- ✅ Proto testing with no code
 
 ---
 
-## 📬 Feedback
+## 🖼️ UI Screenshots
 
-Found a bug or want a feature? Raise an issue or PR!
+Paste these in GitHub issues or docs:
+
+| Home | Service Explorer | Unary | Streaming |
+|------|------------------|-------|-----------|
+| ![Home UI](./screenshots/home.png) | ![Service Explorer](./screenshots/explorer.png) | ![Unary Result](./screenshots/unary.png) | ![Streaming](./screenshots/streaming.png) |
+
+Other:
+- ![img_1.png](img/img_1.png)
+- ![img_2.png](img/img_2.png)
+- ![img_3.png](img/img_3.png)
+- ![server.png](img/server.png)
+- ![unary.png](img/unary.png)
 
 ---
 
-## 📄 License
+## 📬 Feedback & Contributions
 
-MIT License. See `LICENSE` for more details.
+Have suggestions or found a bug? Feel free to open an issue or PR.
+
+---
