@@ -4,7 +4,22 @@
 A modern, browser-based UI for testing and interacting with **gRPC** services dynamically. Supports unary, server-streaming, client-streaming, and bidirectional streaming methods using WebSockets and React.
 
 ---
+the website is hosted at http://grpcui.oomagr.me/
 
+the user need a publically accesble server to test using this website
+he can host using ngrok
+# 1. Download & install
+curl -sS https://ngrok.run | sh      # or grab the zip for your OS
+
+# 2. Add your auth token
+ngrok config add-authtoken <YOUR_TOKEN>
+
+#make your server public
+# expose gRPC on localhost:50051
+ngrok http --app-protocol=http2 50051
+
+
+--
 Paste your screenshots here (drag-drop in GitHub or use image links):
 
 ![Home UI](./screenshots/home.png)
