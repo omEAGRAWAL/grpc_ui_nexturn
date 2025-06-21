@@ -5,8 +5,8 @@ A modern, browser-based UI for testing and interacting with **gRPC** services dy
 
 ---
 
-**🌐 Live Demo:** [http://grpcui.oomagr.me:8081](http://grpcui.oomagr.me:8081)  
-**🧪 Sample gRPC Server:** [http://grpcui.omagr.me:50051](http://grpcui.omagr.me:50051)
+**🌐 Live Demo:** [http://grpcui.oomagr.me:8081](http://grpcui.omagr.me:8081/)  
+**🧪 Sample gRPC Server:** [http://grpcui.omagr.me:50051](http://grpcui.omagr.me:50051/)
 
 **Sample Proto file for testing :** ![exaple.proto](uploaded_protos/example.proto)
 > ⚠️ To test your own services, your gRPC server must be publicly accessible.
