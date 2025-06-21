@@ -12,6 +12,17 @@ A modern, browser-based UI for testing and interacting with **gRPC** services dy
 
 ---
 
+## 🖼️ UI Screenshots
+Home 
+- ![img_1.png](img/img_1.png)
+Service 
+- ![img_2.png](img/img_2.png)
+Explorer 
+- ![img_3.png](img/img_3.png)
+Unary response
+- ![server.png](img/server.png)
+Streaming response
+- ![unary.png](img/unary.png)
 ## 🌍 Make Your Server Public Using ngrok
 
 1. **Download & install ngrok**
@@ -165,25 +176,3 @@ You can tweak:
 
 ---
 
-## 🖼️ UI Screenshots
-
-Paste these in GitHub issues or docs:
-
-| Home | Service Explorer | Unary | Streaming |
-|------|------------------|-------|-----------|
-| ![Home UI](./screenshots/home.png) | ![Service Explorer](./screenshots/explorer.png) | ![Unary Result](./screenshots/unary.png) | ![Streaming](./screenshots/streaming.png) |
-
-Other:
-- ![img_1.png](img/img_1.png)
-- ![img_2.png](img/img_2.png)
-- ![img_3.png](img/img_3.png)
-- ![server.png](img/server.png)
-- ![unary.png](img/unary.png)
-
----
-
-## 📬 Feedback & Contributions
-
-Have suggestions or found a bug? Feel free to open an issue or PR.
-
----
