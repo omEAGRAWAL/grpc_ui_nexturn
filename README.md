@@ -7,6 +7,7 @@ A modern, browser-based UI for testing and interacting with **gRPC** services dy
 
 **🌐 Live Demo:** [http://grpcui.oomagr.me:8081](http://grpcui.oomagr.me:8081)  
 **🧪 Sample gRPC Server:** [http://grpcui.omagr.me:50051](http://grpcui.omagr.me:50051)
+
 **Sample Proto file for testing :** ![exaple.proto](uploaded_protos/example.proto)
 > ⚠️ To test your own services, your gRPC server must be publicly accessible.
 
@@ -66,7 +67,7 @@ grpc_ui/
 ├── internals/
 │   └── handler/          # gRPC and WebSocket handlers
 ├── uploaded_protos/      # Temporary proto storage
-├── dist/                 # React UI build (via Vite)
+├── GRPC_UI/dist                 # React UI build (via Vite)
 ├── grpcExampleServer/    # Sample gRPC server
 └── ...
 ```
@@ -142,7 +143,7 @@ Provide headers in JSON format:
 
 - Send multiple messages for streaming methods.
 - Receive real-time responses.
-- To end a client stream, send an empty JSON: `{}`
+- To end a client stream, send  JSON: `{"end":"true"}`
 
 ---
 
