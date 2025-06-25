@@ -1,0 +1,162 @@
+syntax = "proto3";
+
+package userservice;
+
+option go_package = "github.com/example/userservice/pb";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+// Authentication service
+service AuthService {
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc Logout(google.protobuf.Empty) returns (google.protobuf.Empty);
+}
+
+// User management service
+service UserService {
+  // Unary RPC
+  rpc GetUser(GetUserRequest) returns (User);
+  rpc CreateUser(CreateUserRequest) returns (User);
+  rpc UpdateUser(UpdateUserRequest) returns (User);
+  rpc DeleteUser(DeleteUserRequest) returns (google.protobuf.Empty);
+
+  // Server streaming RPC
+  rpc ListUsers(ListUsersRequest) returns (stream User);
+
+  // Client streaming RPC
+  rpc CreateMultipleUsers(stream CreateUserRequest) returns (CreateMultipleUsersResponse);
+
+  // Bidirectional streaming RPC
+  rpc ChatWithSupport(stream ChatMessage) returns (stream ChatMessage);
+}
+
+// File service for demonstration
+service FileService {
+  rpc UploadFile(stream FileChunk) returns (UploadResponse);
+  rpc DownloadFile(DownloadRequest) returns (stream FileChunk);
+}
+
+// Authentication messages
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+  User user = 4;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  int64 expires_in = 2;
+}
+
+// User messages
+message User {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+  string first_name = 4;
+  string last_name = 5;
+  UserRole role = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp updated_at = 8;
+  bool is_active = 9;
+  map<string, string> metadata = 10;
+}
+
+message GetUserRequest {
+  string id = 1;
+}
+
+message CreateUserRequest {
+  string username = 1;
+  string email = 2;
+  string password = 3;
+  string first_name = 4;
+  string last_name = 5;
+  UserRole role = 6;
+  map<string, string> metadata = 7;
+}
+
+message UpdateUserRequest {
+  string id = 1;
+  string username = 2;
+  string email = 3;
+  string first_name = 4;
+  string last_name = 5;
+  UserRole role = 6;
+  bool is_active = 7;
+  map<string, string> metadata = 8;
+}
+
+message DeleteUserRequest {
+  string id = 1;
+}
+
+message ListUsersRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+  UserRole role_filter = 3;
+  bool active_only = 4;
+}
+
+message CreateMultipleUsersResponse {
+  repeated User users = 1;
+  int32 created_count = 2;
+  repeated string errors = 3;
+}
+
+// Chat messages
+message ChatMessage {
+  string id = 1;
+  string user_id = 2;
+  string message = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  MessageType type = 5;
+}
+
+// File messages
+message FileChunk {
+  string file_id = 1;
+  string filename = 2;
+  bytes data = 3;
+  int64 chunk_number = 4;
+  int64 total_chunks = 5;
+  string content_type = 6;
+}
+
+message UploadResponse {
+  string file_id = 1;
+  string filename = 2;
+  int64 file_size = 3;
+  string message = 4;
+}
+
+message DownloadRequest {
+  string file_id = 1;
+}
+
+// Enums
+enum UserRole {
+  USER_ROLE_UNSPECIFIED = 0;
+  USER_ROLE_ADMIN = 1;
+  USER_ROLE_USER = 2;
+  USER_ROLE_MODERATOR = 3;
+}
+
+enum MessageType {
+  MESSAGE_TYPE_UNSPECIFIED = 0;
+  MESSAGE_TYPE_TEXT = 1;
+  MESSAGE_TYPE_SYSTEM = 2;
+  MESSAGE_TYPE_ERROR = 3;
+}

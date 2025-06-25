@@ -5,7 +5,20 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/jhump/protoreflect/desc"
@@ -17,167 +30,153 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
-	"strings"
-	"time"
 )
 
+// Constants and configuration
+const (
+	DefaultProtocVersion = "24.4"
+	CleanupDelay         = 10 * time.Minute
+	DefaultDialTimeout   = 30 * time.Second
+	DefaultPort443       = ":443"
+	DefaultPort80        = ":80"
+)
+
+// Log messages as variables
+var (
+	MsgCleanedUp             = "Cleaned up: %s"
+	MsgProtoUploaded         = "Proto uploaded and compiled successfully"
+	MsgNoFileUploaded        = "No file uploaded"
+	MsgCreateUploadDirFailed = "Could not create upload dir"
+	MsgSaveFileFailed        = "Could not save file"
+	MsgProtocInstallFailed   = "protoc not installed and failed to download: %s"
+	MsgProtoCompileFailed    = "Failed to compile .proto with protoc"
+	MsgReadDescriptorFailed  = "Could not read descriptor set"
+	MsgParseDescriptorFailed = "Failed to parse descriptor set"
+	MsgNoDescriptorLoaded    = "No descriptor loaded"
+	MsgInitPayloadFailed     = "Failed to read init payload"
+	MsgInvalidInitJSON       = "Invalid init JSON"
+	MsgMethodNotFound        = "Method not found"
+	MsgDialTargetFailed      = "Failed to dial target"
+	MsgUnknownMode           = "Unknown or unsupported mode"
+	MsgNoInputMessage        = "No input message"
+	MsgInvalidInput          = "Invalid input"
+	MsgStreamFailed          = "Stream failed"
+	MsgInvalidJSON           = "Invalid JSON"
+	MsgUnmarshalFailed       = "UnmarshalJSON failed"
+	MsgSendMsgFailed         = "SendMsg failed"
+	MsgCloseStreamFailed     = "Closing stream failed"
+	MsgBidiStreamFailed      = "Bidi stream failed"
+	MsgRPCCallFailed         = "RPC call failed"
+	MsgUnexpectedResponse    = "Unexpected response type"
+	MsgUnsupportedOS         = "unsupported OS: %s"
+)
+
+// Global variables with better organization
 var (
 	descriptorSetPath = "./compiled.protoset"
 	tempProtoDir      = "./uploaded_protos"
+	importPaths       []string
+	descriptorSet     descriptorpb.FileDescriptorSet
+	descriptorSetMu   sync.RWMutex // Protect concurrent access
 )
-var importPaths []string
-var descriptorSet descriptorpb.FileDescriptorSet
 
-func HandleProtoUpload(c *gin.Context) {
-	file, err := c.FormFile("proto")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No file uploaded"})
-		return
-	}
-
-	// Create a unique subfolder for this upload
-	userDir := filepath.Join(tempProtoDir, fmt.Sprintf("user-%d", time.Now().UnixNano()))
-	if err := os.MkdirAll(userDir, os.ModePerm); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not create upload dir"})
-		return
-	}
-
-	// Save the uploaded proto file
-	savedPath := filepath.Join(userDir, file.Filename)
-	if err := c.SaveUploadedFile(file, savedPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not save file"})
-		return
-	}
-
-	// Install or find protoc
-	protocPath, err := installProtocIfMissing()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "protoc not installed and failed to download: " + err.Error()})
-		return
-	}
-
-	// Compile .proto to descriptor
-	args := []string{}
-	for _, path := range importPaths {
-		args = append(args, "--proto_path="+path)
-	}
-	args = append(args,
-		"--proto_path="+userDir,
-		"--descriptor_set_out="+descriptorSetPath,
-		"--include_imports",
-		savedPath,
-	)
-
-	cmd := exec.Command(protocPath, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to compile .proto with protoc"})
-		return
-	}
-
-	// Load descriptor set
-	data, err := os.ReadFile(descriptorSetPath)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not read descriptor set"})
-		return
-	}
-	if err := proto.Unmarshal(data, &descriptorSet); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse descriptor set"})
-		return
-	}
-
-	// ✅ Schedule folder deletion after 10 minutes
-	go func(path string) {
-		time.AfterFunc(10*time.Minute, func() {
-			os.RemoveAll(path)
-			fmt.Println("Cleaned up:", path)
-		})
-	}(userDir)
-
-	c.JSON(http.StatusOK, gin.H{"message": "Proto uploaded and compiled successfully"})
-}
-
-func HandleListServices(c *gin.Context) {
-	if len(descriptorSet.File) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "No descriptor loaded"})
-		return
-	}
-
-	result := ListServicesAndMethods()
-	c.JSON(http.StatusOK, result)
-}
-
-func ListServicesAndMethods() map[string][]string {
-	services := make(map[string][]string)
-
-	for _, file := range descriptorSet.File {
-		for _, service := range file.GetService() {
-			serviceName := service.GetName()
-			var methods []string
-			for _, method := range service.GetMethod() {
-				methods = append(methods, method.GetName())
-			}
-			services[serviceName] = methods
-		}
-	}
-
-	return services
-}
-
+// WebSocket upgrader configuration
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin:     func(r *http.Request) bool { return true },
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
 }
 
-// ------------------------------------------------------------------
-// 1) Extend the InitMessage
-// ------------------------------------------------------------------
+// Data structures
 type InitMessage struct {
 	Target   string            `json:"target"`
 	Service  string            `json:"service"`
 	Method   string            `json:"method"`
-	Mode     string            `json:"mode"`               // "unary", "server", …
-	Metadata map[string]string `json:"metadata,omitempty"` // extra gRPC‐MD
-	Auth     *struct {
-		Type     string `json:"type"`               // "basic" | "bearer"
-		Token    string `json:"token,omitempty"`    // bearer / API‑key
-		Username string `json:"username,omitempty"` // basic
-		Password string `json:"password,omitempty"` // basic
-	} `json:"auth,omitempty"`
+	Mode     string            `json:"mode"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+	Auth     *AuthConfig       `json:"auth,omitempty"`
 }
 
-// ------------------------------------------------------------------
-// 2) Build an outgoing context that carries both custom MD and auth
-// ------------------------------------------------------------------
-func buildContext(init *InitMessage) context.Context {
-	md := metadata.New(nil)
-
-	// user‑supplied key/value pairs
-	for k, v := range init.Metadata {
-		md.Append(k, v)
-	}
-
-	// simple auth helpers (extend as needed)
-	if init.Auth != nil {
-		switch strings.ToLower(init.Auth.Type) {
-		case "bearer":
-			md.Append("authorization", "Bearer "+init.Auth.Token)
-		case "basic":
-			creds := base64.StdEncoding.EncodeToString(
-				[]byte(init.Auth.Username + ":" + init.Auth.Password))
-			md.Append("authorization", "Basic "+creds)
-		}
-	}
-
-	return metadata.NewOutgoingContext(context.Background(), md)
+type AuthConfig struct {
+	Type     string `json:"type"`
+	Token    string `json:"token,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 }
+
+type StreamMode string
+
+const (
+	ModeUnary     StreamMode = "unary"
+	ModeServer    StreamMode = "server"
+	ModeClient    StreamMode = "client"
+	ModeBidi      StreamMode = "bidi"
+	EndSignal                = "__END__"
+	EndJSONSignal            = `{"end": true}`
+)
+
+// Error definitions
+var (
+	ErrNoFileUploaded     = errors.New("no file uploaded")
+	ErrCreateUploadDir    = errors.New("could not create upload dir")
+	ErrSaveFile           = errors.New("could not save file")
+	ErrReadDescriptor     = errors.New("could not read descriptor set")
+	ErrParseDescriptor    = errors.New("failed to parse descriptor set")
+	ErrNoDescriptorLoaded = errors.New("no descriptor loaded")
+	ErrMethodNotFound     = errors.New("method not found")
+	ErrInvalidInitJSON    = errors.New("invalid init JSON")
+	ErrDialTarget         = errors.New("failed to dial target")
+)
+
+// Proto upload handler
+func HandleProtoUpload(c *gin.Context) {
+	file, err := c.FormFile("proto")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": MsgNoFileUploaded})
+		return
+	}
+
+	userDir, err := createUserDirectory()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": MsgCreateUploadDirFailed})
+		return
+	}
+
+	savedPath, err := saveUploadedFile(c, file, userDir)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": MsgSaveFileFailed})
+		return
+	}
+
+	if err := compileProtoFile(savedPath, userDir); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := loadDescriptorSet(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	scheduleCleanup(userDir)
+	c.JSON(http.StatusOK, gin.H{"message": MsgProtoUploaded})
+}
+
+// List services handler
+func HandleListServices(c *gin.Context) {
+	descriptorSetMu.RLock()
+	defer descriptorSetMu.RUnlock()
+
+	if len(descriptorSet.File) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": MsgNoDescriptorLoaded})
+		return
+	}
+
+	result := listServicesAndMethods()
+	c.JSON(http.StatusOK, result)
+}
+
+// WebSocket gRPC stream handler
 func HandleGRPCWebSocketStream(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -185,144 +184,324 @@ func HandleGRPCWebSocketStream(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	_, initPayload, err := conn.ReadMessage()
+	init, err := readInitMessage(conn)
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": "Failed to read init payload"})
+		conn.WriteJSON(gin.H{"error": err.Error()})
 		return
 	}
 
-	var init InitMessage
-	if err := json.Unmarshal(initPayload, &init); err != nil {
-		conn.WriteJSON(gin.H{"error": "Invalid init JSON"})
-		return
-	}
-	ctx := buildContext(&init)
-
-	// Lookup method
-	var methodDesc *desc.MethodDescriptor
-	found := false
-	for _, file := range descriptorSet.File {
-		for _, svc := range file.GetService() {
-			fullService := fmt.Sprintf("%s.%s", file.GetPackage(), svc.GetName())
-			if fullService == init.Service || svc.GetName() == init.Service {
-				for _, m := range svc.GetMethod() {
-					if m.GetName() == init.Method {
-						fileDesc, _ := desc.CreateFileDescriptor(file)
-						sd := fileDesc.FindService(fullService)
-						methodDesc = sd.FindMethodByName(init.Method)
-						found = true
-						break
-					}
-				}
-			}
-			if found {
-				break
-			}
-		}
-	}
-	if !found || methodDesc == nil {
-		conn.WriteJSON(gin.H{"error": "Method not found"})
+	ctx := buildContext(init)
+	methodDesc, err := findMethodDescriptor(init)
+	if err != nil {
+		conn.WriteJSON(gin.H{"error": err.Error()})
 		return
 	}
 
-	// Connect to gRPC
 	clientConn, err := dialTarget(init.Target)
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": "Failed to dial target", "details": err.Error()})
+		conn.WriteJSON(gin.H{"error": MsgDialTargetFailed, "details": err.Error()})
 		return
 	}
 	defer clientConn.Close()
 
 	stub := grpcdynamic.NewStub(clientConn)
+	mode := determineStreamMode(init.Mode, methodDesc)
 
-	// ✨ Remove the next line – it nulled out your metadata!
-	//   ctx = context.Background()
-
-	mode := init.Mode
-	if mode == "" {
-		mode = inferMode(methodDesc)
+	if err := handleStreamMode(ctx, stub, conn, methodDesc, mode); err != nil {
+		conn.WriteJSON(gin.H{"error": err.Error()})
 	}
-
-	switch mode {
-	case "unary":
-		handleUnary(ctx, stub, conn, methodDesc)
-	case "server":
-		handleServerStream(ctx, stub, conn, methodDesc)
-	case "client":
-		handleClientStream(ctx, stub, conn, methodDesc)
-	case "bidi":
-		handleBidiStream(ctx, stub, conn, methodDesc)
-	default:
-		conn.WriteJSON(gin.H{"error": "Unknown or unsupported mode"})
-	}
-
 }
 
-func inferMode(method *desc.MethodDescriptor) string {
+// Helper functions
+func createUserDirectory() (string, error) {
+	userDir := filepath.Join(tempProtoDir, fmt.Sprintf("user-%d", time.Now().UnixNano()))
+	return userDir, os.MkdirAll(userDir, os.ModePerm)
+}
+
+func saveUploadedFile(c *gin.Context, file *multipart.FileHeader, userDir string) (string, error) {
+	savedPath := filepath.Join(userDir, file.Filename)
+	return savedPath, c.SaveUploadedFile(file, savedPath)
+}
+
+func compileProtoFile(savedPath, userDir string) error {
+	protocPath, err := installProtocIfMissing()
+	if err != nil {
+		return fmt.Errorf(MsgProtocInstallFailed, err.Error())
+	}
+
+	args := buildProtocArgs(userDir, savedPath)
+	cmd := exec.Command(protocPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		return errors.New(MsgProtoCompileFailed)
+	}
+	return nil
+}
+
+func buildProtocArgs(userDir, savedPath string) []string {
+	args := make([]string, 0, len(importPaths)+5)
+
+	for _, path := range importPaths {
+		args = append(args, "--proto_path="+path)
+	}
+
+	args = append(args,
+		"--proto_path="+userDir,
+		"--descriptor_set_out="+descriptorSetPath,
+		"--include_imports",
+		savedPath,
+	)
+
+	return args
+}
+
+func loadDescriptorSet() error {
+	descriptorSetMu.Lock()
+	defer descriptorSetMu.Unlock()
+
+	data, err := os.ReadFile(descriptorSetPath)
+	if err != nil {
+		return errors.New(MsgReadDescriptorFailed)
+	}
+
+	if err := proto.Unmarshal(data, &descriptorSet); err != nil {
+		return errors.New(MsgParseDescriptorFailed)
+	}
+
+	return nil
+}
+
+func scheduleCleanup(userDir string) {
+	go func(path string) {
+		time.AfterFunc(CleanupDelay, func() {
+			if err := os.RemoveAll(path); err == nil {
+				fmt.Printf(MsgCleanedUp+"\n", path)
+			}
+		})
+	}(userDir)
+}
+
+func listServicesAndMethods() map[string][]string {
+	services := make(map[string][]string)
+
+	for _, file := range descriptorSet.File {
+		for _, service := range file.GetService() {
+			serviceName := service.GetName()
+			methods := make([]string, 0, len(service.GetMethod()))
+
+			for _, method := range service.GetMethod() {
+				methods = append(methods, method.GetName())
+			}
+
+			services[serviceName] = methods
+		}
+	}
+
+	return services
+}
+
+func readInitMessage(conn *websocket.Conn) (*InitMessage, error) {
+	_, initPayload, err := conn.ReadMessage()
+	if err != nil {
+		return nil, errors.New(MsgInitPayloadFailed)
+	}
+
+	var init InitMessage
+	if err := json.Unmarshal(initPayload, &init); err != nil {
+		return nil, errors.New(MsgInvalidInitJSON)
+	}
+
+	return &init, nil
+}
+
+func buildContext(init *InitMessage) context.Context {
+	md := metadata.New(nil)
+
+	// Add user-supplied metadata
+	for k, v := range init.Metadata {
+		md.Append(k, v)
+	}
+
+	// Add authentication metadata
+	if init.Auth != nil {
+		addAuthMetadata(md, init.Auth)
+	}
+
+	return metadata.NewOutgoingContext(context.Background(), md)
+}
+
+func addAuthMetadata(md metadata.MD, auth *AuthConfig) {
+	switch strings.ToLower(auth.Type) {
+	case "bearer":
+		md.Append("authorization", "Bearer "+auth.Token)
+	case "basic":
+		creds := base64.StdEncoding.EncodeToString(
+			[]byte(auth.Username + ":" + auth.Password))
+		md.Append("authorization", "Basic "+creds)
+	}
+}
+
+func findMethodDescriptor(init *InitMessage) (*desc.MethodDescriptor, error) {
+	descriptorSetMu.RLock()
+	defer descriptorSetMu.RUnlock()
+
+	for _, file := range descriptorSet.File {
+		for _, svc := range file.GetService() {
+			fullService := fmt.Sprintf("%s.%s", file.GetPackage(), svc.GetName())
+
+			if fullService == init.Service || svc.GetName() == init.Service {
+				if methodDesc := findMethodInService(file, fullService, init.Method); methodDesc != nil {
+					return methodDesc, nil
+				}
+			}
+		}
+	}
+
+	return nil, errors.New(MsgMethodNotFound)
+}
+
+func findMethodInService(file *descriptorpb.FileDescriptorProto, fullService, methodName string) *desc.MethodDescriptor {
+	fileDesc, err := desc.CreateFileDescriptor(file)
+	if err != nil {
+		return nil
+	}
+
+	sd := fileDesc.FindService(fullService)
+	if sd == nil {
+		return nil
+	}
+
+	return sd.FindMethodByName(methodName)
+}
+
+func determineStreamMode(requestedMode string, methodDesc *desc.MethodDescriptor) StreamMode {
+	if requestedMode != "" {
+		return StreamMode(requestedMode)
+	}
+	return inferMode(methodDesc)
+}
+
+func inferMode(method *desc.MethodDescriptor) StreamMode {
 	switch {
 	case method.IsClientStreaming() && method.IsServerStreaming():
-		return "bidi"
+		return ModeBidi
 	case method.IsClientStreaming():
-		return "client"
+		return ModeClient
 	case method.IsServerStreaming():
-		return "server"
+		return ModeServer
 	default:
-		return "unary"
+		return ModeUnary
+	}
+}
+
+func handleStreamMode(ctx context.Context, stub grpcdynamic.Stub, conn *websocket.Conn,
+	methodDesc *desc.MethodDescriptor, mode StreamMode) error {
+
+	switch mode {
+	case ModeUnary:
+		return handleUnary(ctx, stub, conn, methodDesc)
+	case ModeServer:
+		return handleServerStream(ctx, stub, conn, methodDesc)
+	case ModeClient:
+		return handleClientStream(ctx, stub, conn, methodDesc)
+	case ModeBidi:
+		return handleBidiStream(ctx, stub, conn, methodDesc)
+	default:
+		return errors.New(MsgUnknownMode)
 	}
 }
 
 func dialTarget(rawTarget string) (*grpc.ClientConn, error) {
-	var target string
-	var opts grpc.DialOption
-
-	// Try to parse as full URL (e.g. "https://xxx.ngrok-free.app:443")
-	if strings.HasPrefix(rawTarget, "http://") || strings.HasPrefix(rawTarget, "https://") {
-		u, err := url.Parse(rawTarget)
-		if err != nil {
-			return nil, err
-		}
-		host := u.Host
-		if !strings.Contains(host, ":") {
-			if u.Scheme == "https" {
-				host += ":443"
-			} else {
-				host += ":80"
-			}
-		}
-		target = host
-		if u.Scheme == "https" {
-			opts = grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
-		} else {
-			opts = grpc.WithTransportCredentials(insecure.NewCredentials())
-		}
-	} else {
-		// Assume it's a host:port like "localhost:50051" or "0.tcp.ngrok.io:21934"
-		target = rawTarget
-		if strings.HasSuffix(target, ":443") {
-			opts = grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
-		} else {
-			opts = grpc.WithTransportCredentials(insecure.NewCredentials())
-		}
-	}
-
+	target, opts := parseTargetAndCredentials(rawTarget)
 	return grpc.Dial(target, opts)
 }
 
-func handleServerStream(ctx context.Context, stub grpcdynamic.Stub, conn *websocket.Conn, method *desc.MethodDescriptor) {
+func parseTargetAndCredentials(rawTarget string) (string, grpc.DialOption) {
+	// Handle full URLs
+	if strings.HasPrefix(rawTarget, "http://") || strings.HasPrefix(rawTarget, "https://") {
+		return parseURLTarget(rawTarget)
+	}
+
+	// Handle host:port format
+	return parseHostPortTarget(rawTarget)
+}
+
+func parseURLTarget(rawTarget string) (string, grpc.DialOption) {
+	u, err := url.Parse(rawTarget)
+	if err != nil {
+		return rawTarget, grpc.WithTransportCredentials(insecure.NewCredentials())
+	}
+
+	host := u.Host
+	if !strings.Contains(host, ":") {
+		if u.Scheme == "https" {
+			host += DefaultPort443
+		} else {
+			host += DefaultPort80
+		}
+	}
+
+	if u.Scheme == "https" {
+		return host, grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
+	}
+
+	return host, grpc.WithTransportCredentials(insecure.NewCredentials())
+}
+
+func parseHostPortTarget(rawTarget string) (string, grpc.DialOption) {
+	if strings.HasSuffix(rawTarget, DefaultPort443) {
+		return rawTarget, grpc.WithTransportCredentials(credentials.NewClientTLSFromCert(nil, ""))
+	}
+
+	return rawTarget, grpc.WithTransportCredentials(insecure.NewCredentials())
+}
+
+// Stream handlers
+func handleUnary(ctx context.Context, stub grpcdynamic.Stub,
+	conn *websocket.Conn, method *desc.MethodDescriptor) error {
+
 	_, msgRaw, err := conn.ReadMessage()
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": "No input message"})
-		return
+		return errors.New(MsgNoInputMessage)
 	}
+
 	reqMsg := dynamic.NewMessage(method.GetInputType())
 	if err := reqMsg.UnmarshalJSON(msgRaw); err != nil {
-		conn.WriteJSON(gin.H{"error": "Invalid input", "details": err.Error()})
-		return
+		return fmt.Errorf("%s: %v", MsgInvalidInput, err)
 	}
+
+	resp, err := stub.InvokeRpc(ctx, method, reqMsg)
+	if err != nil {
+		return fmt.Errorf("%s: %v", MsgRPCCallFailed, err)
+	}
+
+	dynResp, ok := resp.(*dynamic.Message)
+	if !ok {
+		return errors.New(MsgUnexpectedResponse)
+	}
+
+	data, _ := dynResp.MarshalJSON()
+	return conn.WriteMessage(websocket.TextMessage, data)
+}
+
+func handleServerStream(ctx context.Context, stub grpcdynamic.Stub,
+	conn *websocket.Conn, method *desc.MethodDescriptor) error {
+
+	_, msgRaw, err := conn.ReadMessage()
+	if err != nil {
+		return errors.New(MsgNoInputMessage)
+	}
+
+	reqMsg := dynamic.NewMessage(method.GetInputType())
+	if err := reqMsg.UnmarshalJSON(msgRaw); err != nil {
+		return fmt.Errorf("%s: %v", MsgInvalidInput, err)
+	}
+
 	stream, err := stub.InvokeRpcServerStream(ctx, method, reqMsg)
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": "Stream failed", "details": err.Error()})
-		return
+		return fmt.Errorf("%s: %v", MsgStreamFailed, err)
 	}
 
 	for {
@@ -330,19 +509,23 @@ func handleServerStream(ctx context.Context, stub grpcdynamic.Stub, conn *websoc
 		if err != nil {
 			break
 		}
-		dynMsg, ok := msg.(*dynamic.Message)
-		if ok {
-			data, _ := dynMsg.MarshalJSON()
-			conn.WriteMessage(websocket.TextMessage, data)
+
+		if dynMsg, ok := msg.(*dynamic.Message); ok {
+			if data, err := dynMsg.MarshalJSON(); err == nil {
+				conn.WriteMessage(websocket.TextMessage, data)
+			}
 		}
 	}
+
+	return nil
 }
 
-func handleClientStream(ctx context.Context, stub grpcdynamic.Stub, conn *websocket.Conn, method *desc.MethodDescriptor) {
+func handleClientStream(ctx context.Context, stub grpcdynamic.Stub,
+	conn *websocket.Conn, method *desc.MethodDescriptor) error {
+
 	stream, err := stub.InvokeRpcClientStream(ctx, method)
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": "Stream failed", "details": err.Error()})
-		return
+		return fmt.Errorf("%s: %v", MsgStreamFailed, err)
 	}
 
 	for {
@@ -351,148 +534,157 @@ func handleClientStream(ctx context.Context, stub grpcdynamic.Stub, conn *websoc
 			break
 		}
 
-		// Parse raw JSON to check for {"end": true}
-		var generic map[string]interface{}
-		if err := json.Unmarshal(msgRaw, &generic); err != nil {
-			conn.WriteJSON(gin.H{"error": "Invalid JSON", "details": err.Error()})
-			continue
-		}
-
-		if val, ok := generic["end"].(bool); ok && val {
+		if shouldEndClientStream(msgRaw) {
 			break
 		}
 
-		// Unmarshal into dynamic gRPC request message
 		reqMsg := dynamic.NewMessage(method.GetInputType())
 		if err := reqMsg.UnmarshalJSON(msgRaw); err != nil {
-			conn.WriteJSON(gin.H{"error": "UnmarshalJSON failed", "details": err.Error()})
-			continue
+			continue // Skip invalid messages
 		}
 
 		if err := stream.SendMsg(reqMsg); err != nil {
-			conn.WriteJSON(gin.H{"error": "SendMsg failed", "details": err.Error()})
-			break
+			return fmt.Errorf("%s: %v", MsgSendMsgFailed, err)
 		}
 	}
 
 	resp, err := stream.CloseAndReceive()
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": "Closing stream failed", "details": err.Error()})
-		return
+		return fmt.Errorf("%s: %v", MsgCloseStreamFailed, err)
 	}
+
 	if dynResp, ok := resp.(*dynamic.Message); ok {
 		data, _ := dynResp.MarshalJSON()
 		conn.WriteMessage(websocket.TextMessage, data)
 	}
+
+	return nil
 }
 
-func handleBidiStream(ctx context.Context, stub grpcdynamic.Stub, conn *websocket.Conn, method *desc.MethodDescriptor) {
+func shouldEndClientStream(msgRaw []byte) bool {
+	var generic map[string]interface{}
+	if err := json.Unmarshal(msgRaw, &generic); err != nil {
+		return false
+	}
+
+	if val, ok := generic["end"].(bool); ok && val {
+		return true
+	}
+
+	return false
+}
+
+func handleBidiStream(ctx context.Context, stub grpcdynamic.Stub,
+	conn *websocket.Conn, method *desc.MethodDescriptor) error {
+
 	stream, err := stub.InvokeRpcBidiStream(ctx, method)
 	if err != nil {
-		conn.WriteJSON(gin.H{"error": "Bidi stream failed", "details": err.Error()})
-		return
+		return fmt.Errorf("%s: %v", MsgBidiStreamFailed, err)
 	}
 
 	done := make(chan struct{})
+	errChan := make(chan error, 2)
 
-	// Reader (from client to gRPC)
+	// Reader goroutine
 	go func() {
+		defer stream.CloseSend()
+
 		for {
 			_, msgRaw, err := conn.ReadMessage()
-			if err != nil || string(msgRaw) == "__END__" {
-				stream.CloseSend()
+			if err != nil || string(msgRaw) == EndSignal {
 				break
 			}
+
 			reqMsg := dynamic.NewMessage(method.GetInputType())
 			if err := reqMsg.UnmarshalJSON(msgRaw); err == nil {
-				_ = stream.SendMsg(reqMsg)
+				if err := stream.SendMsg(reqMsg); err != nil {
+					errChan <- err
+					break
+				}
 			}
 		}
 	}()
 
-	// Writer (from gRPC to client)
+	// Writer goroutine
 	go func() {
+		defer close(done)
+
 		for {
 			msg, err := stream.RecvMsg()
 			if err != nil {
 				break
 			}
-			dynMsg, ok := msg.(*dynamic.Message)
-			if ok {
-				data, _ := dynMsg.MarshalJSON()
-				conn.WriteMessage(websocket.TextMessage, data)
+
+			if dynMsg, ok := msg.(*dynamic.Message); ok {
+				if data, err := dynMsg.MarshalJSON(); err == nil {
+					if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+						errChan <- err
+						break
+					}
+				}
 			}
 		}
-		close(done)
 	}()
 
-	<-done
-}
-func handleUnary(ctx context.Context, stub grpcdynamic.Stub,
-	conn *websocket.Conn, method *desc.MethodDescriptor) {
-
-	// Read one payload frame from the WebSocket → request JSON
-	_, msgRaw, err := conn.ReadMessage()
-	if err != nil {
-		conn.WriteJSON(gin.H{"error": "No input message"})
-		return
-	}
-
-	// Build dynamic request from JSON
-	reqMsg := dynamic.NewMessage(method.GetInputType())
-	if err := reqMsg.UnmarshalJSON(msgRaw); err != nil {
-		conn.WriteJSON(gin.H{"error": "Invalid input", "details": err.Error()})
-		return
-	}
-
-	// Invoke the RPC
-	resp, err := stub.InvokeRpc(ctx, method, reqMsg)
-	if err != nil {
-		conn.WriteJSON(gin.H{"error": "RPC call failed", "details": err.Error()})
-		return
-	}
-
-	// Marshal and send the single response
-	if dynResp, ok := resp.(*dynamic.Message); ok {
-		data, _ := dynResp.MarshalJSON()
-		conn.WriteMessage(websocket.TextMessage, data)
-	} else {
-		conn.WriteJSON(gin.H{"error": "Unexpected response type"})
+	select {
+	case err := <-errChan:
+		return err
+	case <-done:
+		return nil
 	}
 }
 
+// Protocol buffer compiler installation
 func installProtocIfMissing() (string, error) {
-	protocPath, err := exec.LookPath("protoc")
-	if err == nil {
-		return protocPath, nil // Already installed
+	if protocPath, err := exec.LookPath("protoc"); err == nil {
+		return protocPath, nil
 	}
 
-	// Detect OS and arch
-	var osName string
-	//var arch string
+	osName, err := getOSName()
+	if err != nil {
+		return "", err
+	}
+
+	return downloadAndInstallProtoc(osName)
+}
+
+func getOSName() (string, error) {
 	switch runtime.GOOS {
 	case "windows":
-		osName = "win64"
+		return "win64", nil
 	case "darwin":
-		osName = "osx-x86_64"
+		return "osx-x86_64", nil
 	case "linux":
-		osName = "linux-x86_64"
+		return "linux-x86_64", nil
 	default:
-		return "", fmt.Errorf("unsupported OS: %s", runtime.GOOS)
+		return "", fmt.Errorf(MsgUnsupportedOS, runtime.GOOS)
 	}
-	//arch := "x86_64" // Only supporting 64-bit for simplicity
+}
 
-	// Construct download URL
-	version := "24.4" // Change as needed
-	baseURL := "https://github.com/protocolbuffers/protobuf/releases/download"
-	filename := fmt.Sprintf("protoc-%s-%s.zip", version, osName)
-	url := fmt.Sprintf("%s/v%s/%s", baseURL, version, filename)
+func downloadAndInstallProtoc(osName string) (string, error) {
+	url := buildProtocDownloadURL(osName)
 
-	// Download
 	tmpDir := filepath.Join(os.TempDir(), ".protoc")
 	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		return "", err
 	}
+
+	zipPath, err := downloadProtoc(url, tmpDir, osName)
+	if err != nil {
+		return "", err
+	}
+
+	return extractProtoc(zipPath, tmpDir)
+}
+
+func buildProtocDownloadURL(osName string) string {
+	filename := fmt.Sprintf("protoc-%s-%s.zip", DefaultProtocVersion, osName)
+	return fmt.Sprintf("https://github.com/protocolbuffers/protobuf/releases/download/v%s/%s",
+		DefaultProtocVersion, filename)
+}
+
+func downloadProtoc(url, tmpDir, osName string) (string, error) {
+	filename := fmt.Sprintf("protoc-%s-%s.zip", DefaultProtocVersion, osName)
 	zipPath := filepath.Join(tmpDir, filename)
 
 	resp, err := http.Get(url)
@@ -506,11 +698,15 @@ func installProtocIfMissing() (string, error) {
 		return "", err
 	}
 	defer out.Close()
+
 	if _, err := io.Copy(out, resp.Body); err != nil {
 		return "", err
 	}
 
-	// Unzip
+	return zipPath, nil
+}
+
+func extractProtoc(zipPath, tmpDir string) (string, error) {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return "", err
@@ -518,37 +714,45 @@ func installProtocIfMissing() (string, error) {
 	defer r.Close()
 
 	installDir := filepath.Join(tmpDir, "protoc")
-	os.RemoveAll(installDir) // Clean before unzip
+	os.RemoveAll(installDir) // Clean before extraction
+
 	for _, f := range r.File {
-		fpath := filepath.Join(installDir, f.Name)
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(fpath, 0755)
-			continue
-		}
-		os.MkdirAll(filepath.Dir(fpath), 0755)
-
-		rc, err := f.Open()
-		if err != nil {
+		if err := extractFile(f, installDir); err != nil {
 			return "", err
 		}
-		defer rc.Close()
-
-		dest, err := os.Create(fpath)
-		if err != nil {
-			return "", err
-		}
-		if _, err := io.Copy(dest, rc); err != nil {
-			return "", err
-		}
-		dest.Close()
 	}
 
-	binDir := filepath.Join(installDir, "bin")
-	protocExecutable := filepath.Join(binDir, "protoc")
+	protocExecutable := filepath.Join(installDir, "bin", "protoc")
 	if runtime.GOOS == "windows" {
 		protocExecutable += ".exe"
 	}
 
-	// Put protocExecutable in PATH by returning it for use in exec.Command
 	return protocExecutable, nil
+}
+
+func extractFile(f *zip.File, installDir string) error {
+	fpath := filepath.Join(installDir, f.Name)
+
+	if f.FileInfo().IsDir() {
+		return os.MkdirAll(fpath, 0755)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+		return err
+	}
+
+	rc, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+
+	dest, err := os.Create(fpath)
+	if err != nil {
+		return err
+	}
+	defer dest.Close()
+
+	_, err = io.Copy(dest, rc)
+	return err
 }
